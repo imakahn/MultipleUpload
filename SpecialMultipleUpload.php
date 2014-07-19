@@ -6,6 +6,8 @@
  * @ingroup Upload
  */
 class SpecialMultipleUpload extends SpecialUpload {
+    protected $mRecoverableFiles, $mUnRecoverableFiles, $mRecursionKey;
+    protected $mRenameClicked, $mRenamedFiles;
 
     /**
      * Constructor : initialise object
@@ -37,17 +39,40 @@ class SpecialMultipleUpload extends SpecialUpload {
             }
         }
 
-        // Process upload or show a form
-        if ( $this->mTokenOk && !$this->mCancelUpload && $this->mUploadClicked ) {
-            $this->recurseThroughUpload();
+        // Process upload or show a form -- be it uploading or renaming files //todo clean this up
+        if ( $this->mTokenOk && !$this->mCancelUpload ) {
+            if ( $this->mUploadClicked ) {
+                $this->recurseThroughUpload();
+
+                if ( !empty( $this->mRecoverableFiles ) ) {
+                /* todo don't need to do this, just need to set the parameter (already done) and
+                 * run through the recursion again. have all functions check for that param
+                 */
+                    $this->showUploadForm( $this->getRenameForm() );
+                }
+                else {
+                    $this->afterSuccess();
+                }
+            }
+            elseif ( $this->mRenameClicked ) { //todo make into function
+                if ( isset( $this->mRenamedFiles ) ){
+                    foreach ( $this->mRenamedFiles as $file ) {
+
+                    }
+
+                }
+                else {
+                    $this->showUploadForm( $this->getRenameForm( "Error: You didn't rename any of the files!" ) );
+                }
+            }
         }
         else {
             $this->showUploadForm( $this->getUploadForm() );
         }
 
-        // Cleanup
+        // Cleanup //todo this especially
         if ( $this->mUpload ) {
-            $this->mUpload->cleanupTempFile(); //todo check if we want this behavior
+            $this->mUpload->cleanupTempFile();
         }
     }
 
@@ -66,7 +91,7 @@ class SpecialMultipleUpload extends SpecialUpload {
     /*
      *
      */
-    protected function userChecks() { // todo rename
+    protected function userChecks() {
         $user = $this->getUser();
         $groups = $user->getGroups();
         $elevatedGroups = array( 'bureaucrat', 'sysop');
@@ -87,11 +112,10 @@ class SpecialMultipleUpload extends SpecialUpload {
     }
 
     /**
-     * Initialize instance variables from request todo move this up
+     * Initialize instance variables from request
      */
     protected function loadRequest() {
-        // load request; initiating class directly TODO put the explanation here
-        $this->mRequest = $request = new WebRequestMultiple;
+        $this->mRequest = $request = $this->getRequest();
 
         $this->mDesiredDestName = ''; //todo get this to work with renameForm only
         $this->mLicense = $request->getText( 'wpLicense' );
@@ -101,25 +125,27 @@ class SpecialMultipleUpload extends SpecialUpload {
         $this->mCopyrightSource = $request->getText( 'wpUploadSource' );
         $this->mForReUpload = $request->getBool( 'wpForReUpload' ); // updating a file todo rename form?
         $this->mCancelUpload = $request->getCheck( 'wpCancelUpload' );
-        $this->mUploadClicked = $this->getUploadClicked( $request );
-        $this->mComment = $this->getComment( $request );
+        $this->mUploadClicked = $this->getClicked( $request, 'wpMultipleUpload' );
 
-        $this->mIgnoreWarning = $request->getCheck( 'wpIgnoreWarning' )
-            || $request->getCheck( 'wpUploadIgnoreWarning' );
-
-        // If it was posted check for the token (no remote POST'ing with user credentials)
+        // If it was posted check for the token (no remote POSTing with user credentials)
         $token = $request->getVal( 'wpEditToken' );
         $this->mTokenOk = $this->getUser()->matchEditToken( $token );
+
+        // Specific to rename form:
+        $this->mRenameClicked = $renameClicked = $this->getClicked( $request, 'wpMultipleRename' );
+
+        for ( $num = 1 ; $num < ini_get( 'max_file_uploads' ) ; $num++ ) {
+            $this->mRenamedFiles[] = $request->getText( "wpRename$num" );
+        }
     }
 
     /*
      *
      */
-    protected function getUploadClicked ( WebRequestMultiple $request ) {
-        if (
-            $request->wasPosted() &&
-            ( $request->getCheck( 'wpUpload' ) || $request->getCheck( 'wpUploadIgnoreWarning' ) )
-        ) return true;
+    protected function getClicked ( WebRequest $request, $label ) {
+        if ( $request->wasPosted() && $request->getCheck( $label ) ) {
+            return true;
+        }
 
         return false;
     }
@@ -127,28 +153,55 @@ class SpecialMultipleUpload extends SpecialUpload {
     /*
      *
      */
-    protected function getComment ( WebRequestMultiple $request, $commentDefault = null) {
-        $commentMsg = wfMessage( 'upload-default-description' )->inContentLanguage();
-        if ( !$this->mForReUpload && !$commentMsg->isDisabled() ) {
-            $commentDefault = $commentMsg->plain();
-        }
+    protected function getUploadForm( $message = '', $sessionKey = '', $hideIgnoreWarning = false ) {
+        $context = new DerivativeContext( $this->getContext() );
+        $context->setTitle( $this->getTitle() );
 
-        return $request->getText( 'wpUploadDescription', $commentDefault );
+        $form = new MultipleUploadForm( array(
+            'watch' => $this->getWatchCheck(),
+            'forreupload' => $this->mForReUpload,
+            'sessionkey' => $sessionKey,
+            'hideignorewarning' => $hideIgnoreWarning, //todo remove
+            'destwarningack' => (bool)$this->mDestWarningAck,
+            'description' => $this->mComment,
+            'texttop' => $this->uploadFormTextTop,
+            'textaftersummary' => $this->uploadFormTextAfterSummary,
+            'destfile' => '',
+        ), $context );
+
+        # Add upload error message
+        $form->addPreText( $message );
+
+        return $form;
     }
 
     /*
-     * todo document
+     *
+     */
+    protected function getRenameForm( $message = '' ) {
+        $context = new DerivativeContext( $this->getContext() );
+        $context->setTitle( $this->getTitle() ); //todo set title here?
+
+        $form = new MultipleRenameForm( $this->mRecoverableFiles, $context );
+
+        # Add upload error message
+        $form->addPreText( $message );
+
+        return $form;
+    }
+
+    /*
+     *
      */
     protected function recurseThroughUpload() {
         $request = $this->mRequest;
         $count = $this->countUploads();
 
-        for( $i = 0 ; $i < $count ; $i++ ) {
-            // injecting property (current key in recursion) into $request
-            // bit hackish, see ./MultipleUpload.php for details todo document better
-            $request->recursionKey = $i;
+        for( $key = 0 ; $key < $count ; $key++ ) {
+            $this->mRecursionKey = $key;
+            $this->mUpload = $upload = UploadBase::createFromRequest( $request, 'MultipleFile' );
 
-            $this->mUpload = UploadBase::createFromRequest( $request );
+            $upload->reInitializePathInfo( $key );
             $this->processUpload();
         }
     }
@@ -162,27 +215,27 @@ class SpecialMultipleUpload extends SpecialUpload {
 
     /**
      * Do the upload.
-     * Checks are made in SpecialUpload::execute()
      */
     protected function processUpload() {
         $details = $this->mUpload->verifyUpload();
         if ( $details['status'] != UploadBase::OK ) {
-            $this->processVerificationError( $details );
+            $this->errorRouter( $details );
             return;
         }
 
         $permErrors = $this->mUpload->verifyTitlePermissions( $this->getUser() );
-        if ( $permErrors !== true ) {
+        if ( $permErrors !== true ) { // UploadBase should be cleaned up for consistent return values from validators..
+            // letting this one go for now, cost of hunting down every last error possibility/constant too high
             $code = array_shift( $permErrors[0] );
-            $this->showRecoverableUploadError( $this->msg( $code, $permErrors[0] )->parse() );
+            $this->errorRouter( $code );
             return;
         }
 
         if ( !$this->mIgnoreWarning ) {
-            $warnings = $this->mUpload->checkWarnings();
-            if ( $this->showUploadWarning( $warnings ) ) {
-                return;
+            if (  $warnings = $this->mUpload->checkWarnings() ){
+                $this->errorRouter( $warnings );
             }
+            return;
         }
 
         // Get the page text if this is not a reupload
@@ -195,11 +248,9 @@ class SpecialMultipleUpload extends SpecialUpload {
 
         $status = $this->mUpload->performUpload( $this->mComment, $pageText, $this->mWatchthis, $this->getUser() );
         if ( !$status->isGood() ) {
-            $this->showUploadError( $this->getOutput()->parse( $status->getWikiText() ) );
+            $this->showUploadError( $this->getOutput()->parse( $status->getWikiText() ) ); //todo have to add to router!
             return;
         }
-
-       $this->afterSuccess();
     }
 
     /*
@@ -215,101 +266,83 @@ class SpecialMultipleUpload extends SpecialUpload {
     /*
      *
      */
-    protected function getUploadForm( $message = '', $sessionKey = '', $hideIgnoreWarning = false ) {
-        $context = new DerivativeContext( $this->getContext() );
-        $context->setTitle( $this->getTitle() ); // Remove subpage todo?
+    protected function errorRouter( $error ) {
+        $warnings = array(
+            'badfilename',
+            'exists',
+            'duplicate',
+            'duplicate-archive',
+            'file-deleted-duplicate',
+            'bad-prefix',
+            'page-exists',
+            'exists-normalized',
+            'thumb',
+            'thumb-name',
+            'was-deleted'
+        );
 
-        $form = new MultipleUploadForm( array(
-            'watch' => $this->getWatchCheck(),
-            'forreupload' => $this->mForReUpload,
-            'sessionkey' => $sessionKey,
-            'hideignorewarning' => $hideIgnoreWarning,
-            'destwarningack' => (bool)$this->mDestWarningAck,
-            'description' => $this->mComment,
-            'texttop' => $this->uploadFormTextTop,
-            'textaftersummary' => $this->uploadFormTextAfterSummary,
-            'destfile' => '',
-        ), $context );
+        if ( is_array( $error ) ) {
+            if ( isset( $error['status'] ) ) {
+                $status = $error['status'];
 
-        return $form;
+                switch ( $status ) {
+                    /** Statuses that only require name changing **/
+                    case UploadBase::MIN_LENGTH_PARTNAME:
+                    case UploadBase::ILLEGAL_FILENAME:
+                    case UploadBase::FILENAME_TOO_LONG:
+                    case UploadBase::FILETYPE_MISSING:
+                    case UploadBase::WINDOWS_NONASCII_FILENAME:
+                        // UploadBase method name is weird--this actually gives us the msg constant
+                        $msg = $this->mUpload->getVerificationErrorCode( $status );
+                        $this->storeError( $msg, true );
+                        break;
+
+                    /** Statuses that require reuploading **/
+                    case UploadBase::EMPTY_FILE:
+                    case UploadBase::FILE_TOO_LARGE:
+                    case UploadBase::FILETYPE_BADTYPE:
+                    case UploadBase::VERIFICATION_ERROR:
+                    case UploadBase::HOOK_ABORTED:
+                        $msg = $this->mUpload->getVerificationErrorCode( $status );
+                        $this->storeError( $msg, false );
+                        break;
+                    default:
+                        throw new MWException( __METHOD__ . ": Unknown value $status" );
+                }
+            }
+            else {
+                foreach ( $error as $key ) {
+                    foreach ( $key as $value ) {
+                        if ( in_array( $value, $warnings ) ) {
+                            $this->storeError( $value, true );
+                        }
+                    }
+                }
+            }
+        }
+        else {
+            // must be a mUpload->verifyTitlePermissions error
+            $this->storeError( $error, false );
+        }
     }
 
-    /**
-     * Provides output to the user for a result of UploadBase::verifyUpload
+    /*
      *
-     * @param array $details result of UploadBase::verifyUpload
-     * @throws MWException
      */
-    protected function processVerificationError( $details ) {
-        global $wgFileExtensions;
+    protected function storeError( $msg, $recoverable ) {
+        $key = $this->mRecursionKey;
+        // specifically, we're calling the upload -webrequest- class here, not the upload class
+        $name = $this->mRequest->getUpload( 'wpUploadMultipleFile' )->getName();
+            $name = $name[$key];
 
-        switch ( $details['status'] ) {
-
-            /** Statuses that only require name changing **/
-            case UploadBase::MIN_LENGTH_PARTNAME:
-                $this->showRecoverableUploadError( $this->msg( 'minlength1' )->escaped() );
-                break;
-            case UploadBase::ILLEGAL_FILENAME:
-                $this->showRecoverableUploadError( $this->msg( 'illegalfilename',
-                    $details['filtered'] )->parse() );
-                break;
-            case UploadBase::FILENAME_TOO_LONG:
-                $this->showRecoverableUploadError( $this->msg( 'filename-toolong' )->escaped() );
-                break;
-            case UploadBase::FILETYPE_MISSING:
-                $this->showRecoverableUploadError( $this->msg( 'filetype-missing' )->parse() );
-                break;
-            case UploadBase::WINDOWS_NONASCII_FILENAME:
-                $this->showRecoverableUploadError( $this->msg( 'windows-nonascii-filename' )->parse() );
-                break;
-
-            /** Statuses that require reuploading **/
-            case UploadBase::EMPTY_FILE:
-                $this->showUploadError( $this->msg( 'emptyfile' )->escaped() );
-                break;
-            case UploadBase::FILE_TOO_LARGE:
-                $this->showUploadError( $this->msg( 'largefileserver' )->escaped() );
-                break;
-            case UploadBase::FILETYPE_BADTYPE:
-                $msg = $this->msg( 'filetype-banned-type' );
-                if ( isset( $details['blacklistedExt'] ) ) {
-                    $msg->params( $this->getLanguage()->commaList( $details['blacklistedExt'] ) );
-                } else {
-                    $msg->params( $details['finalExt'] );
-                }
-                $extensions = array_unique( $wgFileExtensions );
-                $msg->params( $this->getLanguage()->commaList( $extensions ),
-                    count( $extensions ) );
-
-                // Add PLURAL support for the first parameter. This results
-                // in a bit unlogical parameter sequence, but does not break
-                // old translations
-                if ( isset( $details['blacklistedExt'] ) ) {
-                    $msg->params( count( $details['blacklistedExt'] ) );
-                } else {
-                    $msg->params( 1 );
-                }
-
-                $this->showUploadError( $msg->parse() );
-                break;
-            case UploadBase::VERIFICATION_ERROR:
-                unset( $details['status'] );
-                $code = array_shift( $details['details'] );
-                $this->showUploadError( $this->msg( $code, $details['details'] )->parse() );
-                break;
-            case UploadBase::HOOK_ABORTED:
-                if ( is_array( $details['error'] ) ) { # allow hooks to return error details in an array
-                    $args = $details['error'];
-                    $error = array_shift( $args );
-                } else {
-                    $error = $details['error'];
-                    $args = null;
-                }
-
-                $this->showUploadError( $this->msg( $error, $args )->parse() );
-                break;
-            default:
-                throw new MWException( __METHOD__ . ": Unknown value `{$details['status']}`" );
+        if ( $recoverable !== false ) {
+            // this is recoverable (just needs a rename), so stash the file:
+            $file = $this->mUpload->stashFile( $this->getUser() );
+            //todo also do resize here? is it already time to refactor this?
+            $this->mRecoverableFiles[] = [ 'file' => $file, 'name' => $name, 'msg' => $msg ];
+        }
+        else{
+            $this->mUnRecoverableFiles[] = [ 'name' => $name[$key], 'msg' => $msg ];
         }
     }
 
