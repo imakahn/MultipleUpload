@@ -26,3 +26,4 @@ $wgAutoloadClasses[ 'MultipleRenameForm' ] = __DIR__ . '/MultipleRenameForm.php'
 //$wgAutoloadClasses[ 'MultipleRenameField' ] = __DIR__ . '/MultipleRenameForm.php';
 $wgAutoloadClasses[ 'SpecialMultipleUpload' ] = __DIR__ . '/SpecialMultipleUpload.php';
 $wgAutoloadClasses[ 'UploadFromMultipleFile'] = __DIR__ . '/UploadFromMultipleFile.php';
+$wgAutoloadClasses[ 'UploadFromMultipleStash'] = __DIR__ . '/UploadFromMultipleStash.php';

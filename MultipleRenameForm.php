@@ -1,16 +1,15 @@
 <?php
 
 class MultipleRenameForm extends HTMLForm {
-    protected $recoverableFiles;
+    protected $mRecoverableFiles, $mGallery;
     public $mThumb;
 
     /*
-     * todo just put some helpful text at the top of the form and call it a day
+     *
      */
-    public function __construct( array $recoverableFiles, IContextSource $context = null ) {
-        if ($recoverableFiles) {
-            $this->recoverableFiles = $recoverableFiles;
-        }
+    public function __construct( array $recoverableFiles, array $gallery, IContextSource $context = null ) {
+        $this->mRecoverableFiles = $recoverableFiles;
+        $this->mGallery = $gallery;
 
         $descriptor = $this->getDescriptor();
         parent::__construct( $descriptor, $context, 'rename'); // todo check 'rename' argument
@@ -27,29 +26,46 @@ class MultipleRenameForm extends HTMLForm {
         $descriptor = array();
         $num = 1;
 
-        foreach( $this->recoverableFiles as $file ) {
-            $name = $file['name'];
-            $message = $file['msg'];
-            $stash = $file['file'];
+        $descriptor['SourceType'] = array(
+            'type' => 'hidden',
+            'default' => 'MultipleStash',
+        );
+
+        foreach( $this->mRecoverableFiles as $file ) {
+            list( $stash, $name, $message ) = array( $file['file'], $file['name'], $file['msg'] );
+            $fileKey = $stash->getFileKey();
 
             if ( isset( $stash ) ) {
-                global $wgContLang;
-
                 $thumb = $stash->transform( array( 'width' => 120 ) );
                 $src = $thumb->getUrl();
             }
 
             $descriptor["Rename$num"] = array(
                 'class' => 'MultipleRenameField',
-//                'id' => $fileKey,
                 'label' => htmlentities($name),
-                'title' => $this->msg($message)->text(),
+                'title' => 'Error reason: ' . $message,
                 'required' => true,
                 'src' => isset( $src ) ? $src : ''
             );
 
+            $descriptor["RenameKey$num"] = array(
+                'type' => 'hidden',
+                'default' => $fileKey
+            );
+
             $num++;
         }
+
+        $descriptor['IgnoreWarning'] = array(
+            'type' => 'check',
+            'label' => 'Ignore Warnings'
+        );
+
+        // arrays etc we don't want to lose. interim until session is utilized. just the gallery currently
+        $descriptor['data'] =  array(
+            'type' => 'hidden',
+            'default' => serialize( $this->mGallery )
+        );
 
         return $descriptor;
     }
@@ -66,7 +82,10 @@ class MultipleRenameForm extends HTMLForm {
 }
 
 class MultipleRenameField extends HTMLFormField{
-    function getLabelHTML() { //todo document
+    /*
+     *
+     */
+    function getLabelHTML() {
         $labelValue = trim( $this->getLabel() );
 
         $thumb = Html::rawElement( 'td',
@@ -86,17 +105,19 @@ class MultipleRenameField extends HTMLFormField{
      *
      */
     function getInputHTML( $value ) {
-        $attribs = array(
-                'id' => $this->mID,
-                'name' => $this->mName,
-                'size' => $this->getSize(),
-                'value' => $value,
-                'type' => 'text',
-                'title' => $this->mParams['title'],
-                'required' => true
-            );
+        $inputAttribs = array(
+            'id' => $this->mID,
+            'name' => $this->mName,
+            'size' => $this->getSize(),
+            'value' => $value,
+            'type' => 'text',
+            'title' => $this->mParams['title'],
+            'required' => true
+        );
 
-        return Html::element( 'input', $attribs );
+        $inputAttribs = Html::element( 'input', $inputAttribs );
+
+        return $inputAttribs;
     }
 
     /**
