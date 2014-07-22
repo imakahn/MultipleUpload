@@ -62,7 +62,7 @@ class MultipleRenameForm extends HTMLForm {
         );
 
         // arrays etc we don't want to lose. interim until session is utilized. just the gallery currently
-        $descriptor['data'] =  array(
+        $descriptor['Data'] =  array(
             'type' => 'hidden',
             'default' => serialize( $this->mGallery )
         );

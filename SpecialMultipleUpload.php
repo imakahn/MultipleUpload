@@ -86,7 +86,7 @@ class SpecialMultipleUpload extends SpecialUpload {
         }
     }
 
-    /* sets mRecursionKey, reinitializes the class properties because of rec, etc
+    /* sets mRecursionKey, reinitializes the class properties for recursion, etc
      *
      */
     protected function recurseThroughUpload() {
@@ -159,23 +159,31 @@ class SpecialMultipleUpload extends SpecialUpload {
     }
 
     /*
-     * Want to see the essentials of content creation in mediawiki in one compact function? Look no further!
+     * Success! Now let's finish up
+     * This function is probably gold to anyone looking for documentation on content creation in mediawiki
      * todo move messages to i18n file
      */
     protected function afterSuccess( $unRecoverable ){
         $userTitle = $this->getUser()->getUserPage(); // actually gives us the title object, page object is next
         $userPage = WikiPage::factory( $userTitle );
+        $oldText = ContentHandler::getContentText( $userPage->getContent() );
 
-        $galleryText = "<gallery>\n" . implode( "\n", $this->mGallery ) .  "\n</gallery>";
+        $galleryText = "$oldText\n\n" . '==' . 'Images uploaded ' . date( 'n-j-y, g:ia' ) . '==' . "\n";
+        $galleryText .= "<gallery>\n" . implode( "\n", $this->mGallery ) .  "\n</gallery>";
+
         if ( !empty( $unRecoverable ) ) {
-            $galleryText = 'The following files failed to upload: \n' . implode( ' ', $unRecoverable ) . $galleryText;
+            $galleryText .= 'The following files failed to upload: \n' . implode( ' ', $unRecoverable ) . $galleryText;
         }
-        $galleryContent = ContentHandler::makeContent( $galleryText, $userTitle );
 
+        $galleryContent = ContentHandler::makeContent( $galleryText, $userTitle );
         $userPage->doEditContent( $galleryContent, 'Batch image upload' );
 
         $this->mUploadSuccessful = true;
-        $this->getOutput()->redirect( $userTitle->getFullURL() );
+        // without this, the images show up as broken links--yet action=purge doesn't actually update the link table..
+        // todo only works about half the time, have to figure out root cause (doEditSection supposedly takes car of all
+        // this, but it's clearly not doing so)
+        $url = $userTitle->getFullURL() . '?action=purge';
+        $this->getOutput()->redirect( $url );
     }
 
     /*
@@ -288,7 +296,7 @@ class SpecialMultipleUpload extends SpecialUpload {
         $name = $this->mDesiredDestName;
 
         if ( $recoverable !== false ) {
-            // this is recoverable (just needs a rename), so stash the file: todo make resize method and call here
+            // this is recoverable (just needs a rename), so stash the file:
             $file = $this->mUpload->stashFile( $this->getUser() );
             $this->mRecoverableFiles[] = [ 'file' => $file, 'name' => $name, 'msg' => $msg ];
         }
@@ -314,8 +322,8 @@ class SpecialMultipleUpload extends SpecialUpload {
         }
 
         foreach ( $groups as $group ) {
-            if( in_array( $group, $elevatedGroups ) ) { //todo increase max size etc here
-
+            if( in_array( $group, $elevatedGroups ) ) { //todo putting this on the job queue would be better
+                ini_set( 'max_execution_time', 500 );
             }
         }
     }
